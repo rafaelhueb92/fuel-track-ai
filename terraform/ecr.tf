@@ -1,8 +1,3 @@
-provider "aws" {
-  region = "sa-east-1"  # Change this to your preferred AWS region
-}
-
-# Create ECR repository
 resource "aws_ecr_repository" "flask_api_repo" {
   name = "flask-fuel-ai-api-repo"
 
@@ -16,7 +11,6 @@ resource "aws_ecr_repository" "flask_api_repo" {
   }
 }
 
-# Build and Push Docker Image using local-exec provisioner
 resource "null_resource" "push_docker_image" {
   depends_on = [aws_ecr_repository.flask_api_repo]
 
