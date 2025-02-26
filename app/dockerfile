@@ -1,0 +1,38 @@
+# Stage 1: Build stage (install dependencies)
+FROM python:3.10-slim AS build-stage
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Install system dependencies and build tools
+RUN apt-get update && \
+    apt-get install -y build-essential libpq-dev && \
+    apt-get clean
+
+# Copy requirements.txt to install dependencies
+COPY requirements.txt requirements-dev.txt /app/
+
+# Install Python dependencies (both runtime and dev dependencies)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Stage 2: Final stage (copy application code and create the final image)
+FROM python:3.10-slim AS final-stage
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Copy installed dependencies from the build stage
+COPY --from=build-stage /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+
+# Copy the application code into the container
+COPY . /app
+
+# Expose the port that the Flask app will run on
+EXPOSE 5000
+
+# Set environment variables (optional)
+ENV FLASK_APP=app.py
+ENV FLASK_ENV=production
+
+# Run the Flask app
+CMD ["flask", "run", "--host=0.0.0.0", "--port=5000"]
