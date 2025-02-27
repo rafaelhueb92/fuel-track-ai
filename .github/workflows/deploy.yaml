@@ -1,116 +1,109 @@
-name: Deploy Infrastructure & App
+name: CI/CD Pipeline
 
 on:
   pull_request:
     branches:
       - main
+  push:
+    branches:
+      - main
 
 jobs:
-  unit-tests:
-    name: Run Unit Tests
+  # 1️⃣ Run Unit Tests before PR can be merged
+  tests:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Set Up Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v3
         with:
-          python-version: '3.9'
+          python-version: "3.9"
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           pip install -r app/requirements.txt
 
       - name: Run Unit Tests
         run: |
-          python -m unittest discover -s app/tests -p "*.py"
+          pytest app/test
 
-  terraform-apply:
-    name: Apply Terraform
+  # 2️⃣ Deploy Infrastructure after PR is merged
+  deploy:
+    needs: tests
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    needs: unit-tests
-    environment: production
-
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Set Up Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: latest
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
 
-      - name: Initialize Terraform
+      - name: Terraform Init
         working-directory: terraform
         run: terraform init
 
-      - name: Validate Terraform
-        working-directory: terraform
-        run: terraform validate
-
-      - name: Plan Terraform
-        working-directory: terraform
-        run: terraform plan
-
-      - name: Apply Terraform
+      - name: Terraform Apply
         working-directory: terraform
         run: terraform apply -auto-approve
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-  install-tools:
-    name: Install ArgoCD & Prometheus
+  # 3️⃣ Install ArgoCD & Prometheus on EKS
+  install_tools:
+    needs: deploy
     runs-on: ubuntu-latest
-    needs: terraform-apply
-
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Set Up Kubectl
-        uses: azure/setup-kubectl@v3
-
-      - name: Set Up Helm
-        uses: azure/setup-helm@v3
-
-      - name: Configure AWS CLI
+      - name: Install Kubectl
         run: |
-          aws eks update-kubeconfig --region your-region --name your-cluster-name
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
 
       - name: Install ArgoCD
         run: |
           kubectl create namespace argocd || true
-          helm repo add argo https://argoproj.github.io/argo-helm
-          helm repo update
-          helm upgrade --install argocd argo/argo-cd --namespace argocd
-          kubectl apply -f k8s/argocd-ingress.yaml
+          kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+          kubectl port-forward svc/argocd-server -n argocd 8080:443 &
 
       - name: Install Prometheus
         run: |
           kubectl create namespace monitoring || true
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo update
-          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring
-          kubectl apply -f k8s/prometheus-ingress.yaml
+          helm install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring
 
-  sync-argocd:
-    name: Sync ArgoCD Applications
+  # 4️⃣ Sync ArgoCD Manifests
+  sync_argocd:
+    needs: install_tools
     runs-on: ubuntu-latest
-    needs: install-tools
-
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Sync ArgoCD Applications
+      - name: Sync ArgoCD
         run: |
           kubectl apply -f k8s/
-          argocd app sync --all
-        env:
-          KUBECONFIG: /root/.kube/config
+
+  # 5️⃣ Check destroy.txt and Destroy Infra if needed
+  destroy:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Check destroy.txt
+        id: check_destroy
+        run: |
+          DESTROY=$(cat destroy.txt)
+          echo "Destroy flag: $DESTROY"
+          echo "DESTROY=$DESTROY" >> $GITHUB_ENV
+
+      - name: Terraform Destroy
+        if: env.DESTROY == 'true'
+        working-directory: terraform
+        run: terraform destroy -auto-approve

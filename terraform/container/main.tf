@@ -20,7 +20,7 @@ resource "null_resource" "this" {
       aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${aws_ecr_repository.this.repository_url}
 
       # Build the Docker image
-      docker build -t flask-api:latest .
+      docker build -t flask-api:latest ../../app
 
       # Tag the Docker image with the ECR repository URL
       docker tag flask-api:latest ${aws_ecr_repository.this.repository_url}:latest
