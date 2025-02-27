@@ -1,0 +1,4 @@
+backend.hcl
+.terraform
+.terraform.lock.hcl
+todo.txt

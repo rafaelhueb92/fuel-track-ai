@@ -1,0 +1,116 @@
+name: Deploy Infrastructure & App
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  unit-tests:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r app/requirements.txt
+
+      - name: Run Unit Tests
+        run: |
+          python -m unittest discover -s app/tests -p "*.py"
+
+  terraform-apply:
+    name: Apply Terraform
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    environment: production
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set Up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: latest
+
+      - name: Initialize Terraform
+        working-directory: terraform
+        run: terraform init
+
+      - name: Validate Terraform
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Plan Terraform
+        working-directory: terraform
+        run: terraform plan
+
+      - name: Apply Terraform
+        working-directory: terraform
+        run: terraform apply -auto-approve
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  install-tools:
+    name: Install ArgoCD & Prometheus
+    runs-on: ubuntu-latest
+    needs: terraform-apply
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set Up Kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Set Up Helm
+        uses: azure/setup-helm@v3
+
+      - name: Configure AWS CLI
+        run: |
+          aws eks update-kubeconfig --region your-region --name your-cluster-name
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Install ArgoCD
+        run: |
+          kubectl create namespace argocd || true
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo update
+          helm upgrade --install argocd argo/argo-cd --namespace argocd
+          kubectl apply -f k8s/argocd-ingress.yaml
+
+      - name: Install Prometheus
+        run: |
+          kubectl create namespace monitoring || true
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring
+          kubectl apply -f k8s/prometheus-ingress.yaml
+
+  sync-argocd:
+    name: Sync ArgoCD Applications
+    runs-on: ubuntu-latest
+    needs: install-tools
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Sync ArgoCD Applications
+        run: |
+          kubectl apply -f k8s/
+          argocd app sync --all
+        env:
+          KUBECONFIG: /root/.kube/config

@@ -1,8 +1,8 @@
-resource "aws_dynamodb_table" "fuel_control" {
+resource "aws_dynamodb_table" "this" {
   name           = "tb_fuel_control"
-  billing_mode   = "PAY_PER_REQUEST"  # Use On-Demand mode (no need to define read/write capacity)
-  hash_key       = "car_id"           # Partition key
-  range_key      = "timestamp"        # Sort key (for querying based on time)
+  billing_mode   = "PAY_PER_REQUEST"   
+  hash_key       = "car_id"           
+  range_key      = "timestamp"         
   
   attribute {
     name = "car_id"
@@ -25,6 +25,4 @@ resource "aws_dynamodb_table" "fuel_control" {
   }
 }
 
-output "dynamodb_table_name" {
-  value = aws_dynamodb_table.fuel_control.name
-}
+

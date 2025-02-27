@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
-BUCKET_NAME="terraform-backend-${ACCOUNT_ID}"
+BUCKET_NAME="backend-tf-${ACCOUNT_ID}"
 
 cat <<EOF > backend.hcl
 bucket         = "${BUCKET_NAME}"

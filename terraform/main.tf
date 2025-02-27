@@ -13,3 +13,18 @@ provider "aws" {
 terraform {
   backend "s3" {}
 }
+
+module db {
+  source = "./db"
+}
+
+module "network" {
+  source = "./network"
+}
+
+module "kubernetes" {
+  source = "./kubernetes"
+
+  depends_on = [module.roles,module.my-eks-vpc]
+
+}
